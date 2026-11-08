@@ -204,30 +204,45 @@ echo "==> Verifying native patches"
 #   HGhubBackdrop        → scripts/ios/main.mm 的垫底层（白条修复）
 #   Accept-Ranges: bytes → src-tauri/src/local_http.rs 的回环服务
 #
-# 直接用 grep -a 扫 Mach-O，不要写成 `strings ... | grep -q`：
-# grep -q 命中后立刻关管道退出，strings 还在往管道里写，被 SIGPIPE 打断后
-# 报 "strings: failed to flush output"；脚本开了 pipefail，这条管道整体算失败，
-# 于是「字符串明明在二进制里」却被判成缺失（Xcode 16.4 上稳定复现）。
-# 同时把 strings 结果落盘一次，失败时能直接看出二进制里到底有什么。
+# 两个坑都要绕开：
+#  ① 不要写 `strings ... | grep -q`：grep -q 命中后立刻关管道退出，strings 还在
+#    往管道里写，被 SIGPIPE 打断后报 "strings: failed to flush output"；脚本开了
+#    pipefail，这条管道整体算失败，于是「字符串明明在二进制里」却被判成缺失
+#    （Xcode 16.4 上稳定复现，日志里那条 ERROR 就是这么来的）。
+#    → 直接 grep -a 扫 Mach-O。
+#  ② ObjC 的 @"..." 字面量在纯 ASCII 时以 UTF-8 存进 __cstring，含非 ASCII 时
+#    改存 UTF-16；纯字节 grep 只认前者。所以 ASCII 查不到时再用 python3 查一遍
+#    UTF-16LE，两种编码都覆盖。
 STRINGS_DUMP="$TMP/hghub-strings.txt"
 strings -a "$APP/HGhub" > "$STRINGS_DUMP" 2>/dev/null || true
 echo "    binary strings: $(wc -l < "$STRINGS_DUMP" | tr -d ' ') lines"
 
-if ! grep -aq "HGhubBackdrop" "$APP/HGhub"; then
+# 返回 0 表示二进制里含该标记（UTF-8 或 UTF-16LE 均算）
+binary_has() {
+  local bin="$1" needle="$2"
+  grep -aq -- "$needle" "$bin" && return 0
+  python3 - "$bin" "$needle" <<'PY'
+import sys
+data = open(sys.argv[1], "rb").read()
+sys.exit(0 if sys.argv[2].encode("utf-16-le") in data else 1)
+PY
+}
+
+if ! binary_has "$APP/HGhub" "HGhubBackdrop"; then
   echo "ERROR: scripts/ios/main.mm patch is missing from the binary" >&2
   echo "       The white bar at the bottom will still be there." >&2
-  echo "       ---- diagnostics (main.mm / ObjC symbols) ----" >&2
-  grep -aiE "Backdrop|HGApply|HGSetup|UGhub|HGhub" "$STRINGS_DUMP" | sort -u | head -20 >&2 || true
+  echo "       ---- diagnostics ----" >&2
+  grep -aiE "Backdrop|HGApply|HGSetup|HGhub|m3u8" "$STRINGS_DUMP" | sort -u | head -20 >&2 || true
   echo "       ---- end ----" >&2
   exit 1
 fi
 echo "    ok: main.mm (backdrop patch)"
 
-if ! grep -aq "Accept-Ranges: bytes" "$APP/HGhub"; then
+if ! binary_has "$APP/HGhub" "Accept-Ranges: bytes"; then
   echo "ERROR: src-tauri/src/local_http.rs is not compiled in" >&2
   echo "       Video will spin forever (AVFoundation cannot use hg://)." >&2
-  echo "       ---- diagnostics (local_http) ----" >&2
-  grep -aiE "Accept-Ranges|Content-Range|127\.0\.0\.1" "$STRINGS_DUMP" | sort -u | head -20 >&2 || true
+  echo "       ---- diagnostics ----" >&2
+  grep -aiE "Accept-Ranges|Content-Range|127\.0\.0\.1|hls\.m3u8" "$STRINGS_DUMP" | sort -u | head -20 >&2 || true
   echo "       ---- end ----" >&2
   exit 1
 fi
