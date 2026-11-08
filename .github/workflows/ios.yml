@@ -1,0 +1,125 @@
+name: Build iOS IPA (unsigned)
+
+# 在 GitHub 托管的 macOS runner 上编译出「未签名 iOS IPA」，
+# 供巨魔商店 / TrollStore 直接安装（TrollStore 会自己重签，所以不需要任何证书、不需要 Apple 开发者账号）。
+#
+# 触发：仓库页面 → Actions → 左侧 "Build iOS IPA (unsigned)" → Run workflow
+# 产物：本次运行页面底部 Artifacts → HGhub-unsigned-ipa
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要构建的分支或标签（留空 = 触发时选中的分支）"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "ios-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 无签名构建仍会读这个变量，给一个格式合法的假 Team ID 以跳过交互式询问。
+  APPLE_DEVELOPMENT_TEAM: ABCDE12345
+  CI: "true"
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_NO_ANALYTICS: "1"
+
+jobs:
+  ipa:
+    name: macos-14 / iphoneos arm64 / unsigned
+    runs-on: macos-14
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 1
+
+      - name: Show toolchain
+        run: |
+          set -eux
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      # 本仓库的 pnpm-workspace.yaml 是按 pnpm 11 的键名写的（allowBuilds 等），
+      # 用 11 才能正确放行 esbuild 的安装脚本。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ios-arm64
+
+      - name: Install frontend dependencies
+        run: |
+          set -eux
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+          node -e "console.log('node', process.version)"
+          pnpm -v
+
+      # 先产出 dist/：ios init 与 custom-protocol 内嵌都依赖它。
+      - name: Build frontend
+        run: pnpm build
+
+      # 生成 src-tauri/gen/apple（.gitignore 已忽略，属于构建期产物）。
+      # --ci 跳过全部交互式提问；APPLE_DEVELOPMENT_TEAM 已在 env 中给出。
+      - name: Init iOS Xcode project
+        run: pnpm exec tauri ios init --ci
+
+      # 真正的编译：scripts/build-ios-ipa.sh
+      #   1) cargo build --features tauri/custom-protocol，把 dist 编进 libapp.a
+      #   2) 把 pbxproj 里依赖 CLI WebSocket 的 Build Rust Code 阶段临时换成 no-op
+      #   3) xcodebuild 全关签名 + ENABLE_DEBUG_DYLIB=NO
+      #   4) Payload/HGhub.app 结构 zip 成 .ipa
+      - name: Build unsigned IPA
+        run: bash scripts/build-ios-ipa.sh
+
+      - name: Verify IPA
+        run: |
+          set -eux
+          ls -lh HGhub-unsigned.ipa
+          shasum -a 256 HGhub-unsigned.ipa | tee HGhub-unsigned.ipa.sha256
+          rm -rf /tmp/ipacheck && mkdir -p /tmp/ipacheck && cd /tmp/ipacheck
+          unzip -q "$GITHUB_WORKSPACE/HGhub-unsigned.ipa"
+          ls -R Payload | sed -n '1,40p'
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier"   Payload/HGhub.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Payload/HGhub.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion"      Payload/HGhub.app/Info.plist
+          lipo -info Payload/HGhub.app/HGhub
+          # 白屏事故的根因就是资源没内嵌，这一步必须过
+          grep -aq "/assets/index-" Payload/HGhub.app/HGhub && echo "ASSETS EMBEDDED: OK"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HGhub-unsigned-ipa
+          path: |
+            HGhub-unsigned.ipa
+            HGhub-unsigned.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30

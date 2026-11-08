@@ -1,0 +1,238 @@
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  CommentPage, Detail, Paged, PlayInfo, Post, RankItem, User, VideoCard,
+} from "./types";
+
+/* ── 运行环境 ───────────────────────────────────────────── */
+
+/** 应用版本（构建时由 vite.config.ts 从 package.json 注入） */
+export const APP_VERSION = __APP_VERSION__;
+
+const ua = navigator.userAgent;
+export const isAndroid = /Android/i.test(ua);
+/** iOS / iPadOS：WKWebView 的 UA 含 "Mac OS X"，需与 macOS 桌面区分；
+ *  iPadOS 还可伪装成 Macintosh，故用 maxTouchPoints 兜底。 */
+export const isIOS =
+  /iPhone|iPad|iPod/i.test(ua) ||
+  (/Macintosh|Mac OS X/i.test(ua) && navigator.maxTouchPoints > 1);
+export const isMacos = /Macintosh|Mac OS X/i.test(ua) && !isIOS;
+
+/** 真实运行平台：用于平台差异化逻辑与文案（安卓硬件返回键、客户端名称等）。 */
+export const runtimePlatform: "android" | "ios" | "windows" | "macos" = isAndroid
+  ? "android"
+  : isIOS
+    ? "ios"
+    : isMacos
+      ? "macos"
+      : "windows";
+
+/** 布局模式：iOS 与 Android 共用同一套移动端 UI（沉浸式竖屏 + 底部 TabBar）。
+ *
+ *  ⚠️ 组件里所有 `platform === "android"` 判断的语义都是「移动端」，不是字面上的
+ *  安卓系统。曾经这里导出的是真实平台值，结果 iOS 拿到 "ios"，Feed.tsx 的
+ *  `isDesktop = platform !== "android"` 成立，播放页改走桌面控制条、评论改走
+ *  372px 右侧停靠面板：窄屏上底部按钮被裁切，面板顶部关闭/返回按钮落进状态栏
+ *  区域无法点击。不要把它改回真实平台值。 */
+export const platform: "android" | "windows" | "macos" =
+  isAndroid || isIOS ? "android" : isMacos ? "macos" : "windows";
+
+/** 语义化别名：明确表示这是「布局模式」，store.tsx 使用这个名字。 */
+export const layoutPlatform = platform;
+
+/** 界面展示用的平台名。 */
+export const platformName =
+  runtimePlatform === "ios" ? "iOS"
+    : runtimePlatform === "android" ? "Android"
+      : runtimePlatform === "macos" ? "macOS" : "Windows";
+
+/** 自定义协议地址随平台不同（见 tauri `register_asynchronous_uri_scheme_protocol` 文档）：
+ *  Windows / Android → `http://<scheme>.localhost`
+ *  macOS / iOS / Linux → `<scheme>://localhost`
+ *  Rust 侧 `src-tauri/src/media.rs` 里改写 m3u8 用的 scheme 必须与此一致。 */
+export const LOCAL = isMacos || isIOS ? "hg://localhost" : "http://hg.localhost";
+
+/** src 是否已是本地协议地址（避免在详情页把代理地址再包一层） */
+export const isLocalMedia = (src: string) => src.startsWith(`${LOCAL}/`);
+
+/** 封面：经本地协议解密（站点封面是 AES 密文）。 */
+export const cover = (url?: string, _w = 480) =>
+  url ? `${LOCAL}/img?u=${encodeURIComponent(url)}` : "";
+
+/** 播放列表：经本地协议改写分片地址，规避 CORS 与防盗链。 */
+export const playlist = (url: string) => `${LOCAL}/hls?u=${encodeURIComponent(url)}`;
+
+/* ── 调用封装 ───────────────────────────────────────────── */
+
+/** 写一行到应用数据目录 debug.log（用户反馈「打不开」时要的就是它） */
+export const logLine = (msg: string) => invoke("debug_log", { msg }).catch(() => {});
+
+async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return (await invoke(cmd, args)) as T;
+  } catch (e) {
+    const msg = typeof e === "string" ? e : "请求失败，请检查网络";
+    // 落盘完整错误链（dns error / connection refused / 证书错误…），toast 只显示截断版
+    logLine(`[api] ${cmd} → ${msg}`);
+    throw new Error(msg.length > 140 ? `${msg.slice(0, 140)}…` : msg);
+  }
+}
+
+/* ── 接口 ───────────────────────────────────────────────── */
+
+export const api = {
+  boot: () => call<{ user: User | null; logged_in: boolean; base: string }>("app_boot"),
+  login: (username: string, password: string) =>
+    call<{ user: User }>("api_login", { username, password }),
+  register: (username: string, password: string, email = "") =>
+    call<{ user: User }>("api_register", { username, password, email }),
+  logout: () => call<{ ok: boolean }>("api_logout"),
+  me: () => call<User>("api_me"),
+
+  feed: (page = 1, size = 20) => call<Paged<VideoCard>>("api_feed", { page, size }),
+  category: (cate: string, page = 1, size = 20) =>
+    call<Paged<VideoCard>>("api_category", { cate, page, size }),
+  rank: (kind: "hot" | "recommend" | "potential") =>
+    call<{ type: string; items: RankItem[] }>("api_rank", { kind }),
+  search: (q: string, page = 1, size = 20) =>
+    call<{ items: VideoCard[]; pagination: Paged<VideoCard>["pagination"]; keyword: string }>(
+      "api_search", { q, page, size },
+    ),
+  posts: (page = 1, size = 20) => call<Paged<Post>>("api_posts", { page, size }),
+  post: (id: number) => call<Post & { content?: string; video_url?: string }>("api_post", { id }),
+
+  video: (id: number) => call<Detail>("api_video", { id }),
+  play: (id: number, ep: number) => call<PlayInfo>("api_play", { id, ep }),
+
+  comments: (id: number, ep: number, page = 1, size = 20) =>
+    call<CommentPage>("api_comments", { id, ep, page, size }),
+  commentSend: (id: number, ep: number, text: string, replyId?: number) =>
+    call<unknown>("api_comment_send", { id, ep, text, replyId: replyId ?? null }),
+
+  clearCache: () => invoke<void>("cache_clear"),
+  netDiag: () => invoke<Record<string, unknown>>("net_diag"),
+  postLike: (id: number, on: boolean) => invoke<unknown>("api_post_like", { id, on }),
+  postCollect: (id: number, on: boolean) => invoke<unknown>("api_post_collect", { id, on }),
+  postComments: (id: number, page: number, size: number) => call<CommentPage>("api_post_comments", { id, page, size }),
+  like: (id: number, ep: number, on: boolean) => call<unknown>("api_like", { id, ep, on }),
+  collect: (id: number, on: boolean) => call<unknown>("api_collect", { id, on }),
+  follow: (uid: number, on: boolean) => call<unknown>("api_follow", { uid, on }),
+
+  /* 线路（数据源）：固定线路写死在 Rust 侧，镜像线路按需从地址发布页拉取 */
+  lineState: () => call<LineState>("line_state"),
+  lineSet: (url: string) => call<string>("line_set", { url }),
+  lineMirrors: () => call<LineMirrors>("line_mirrors"),
+  lineProbe: (urls: string[]) => call<LineProbe[]>("line_probe", { urls }),
+
+  /* 更新检查：对比 GitHub Release 的 tag */
+  checkUpdate: () => call<UpdateInfo>("check_update"),
+  openUrl: (url: string) => call<void>("open_url", { url }),
+
+  /* iOS 原生：屏幕方向与系统状态栏。
+     非 iOS 平台命令是空实现，调用也不会报错，但界面只在 iOS 展示入口。 */
+  setOrientation: (landscape: boolean) => call<void>("set_orientation_cmd", { landscape }),
+  setStatusBar: (hidden: boolean) => call<void>("set_status_bar_cmd", { hidden }),
+};
+
+/* ── 更新检查 ───────────────────────────────────────────── */
+
+export type UpdateInfo = {
+  current: string;
+  latest: string;
+  tag?: string;
+  has_update: boolean;
+  url: string;
+  name?: string;
+  published_at?: string;
+  notes?: string;
+};
+
+/* ── 线路（数据源） ─────────────────────────────────────── */
+
+export type LineItem = { name?: string; url: string; host?: string };
+export type LineState = { base: string; default: string; fixed: LineItem[] };
+export type LineMirrors = { source: string; script?: string; items: LineItem[] };
+export type LineProbe = { url: string; ok: boolean; status?: number; ms: number; error?: string };
+
+/** `https://a.b/c` → `a.b`（线路展示用） */
+export const hostOf = (url: string) => {
+  try { return new URL(url).host; } catch { return url.replace(/^https?:\/\//, "").replace(/\/.*$/, ""); }
+};
+
+/* ── 自检：验证 webview → 本地协议 → 上游 的取流链路 ───────── */
+export async function selfTest(): Promise<string> {
+  const steps: string[] = [];
+  try {
+    const info = await api.play(117, 3);
+    steps.push(`play:${info?.video_url ? "ok" : "empty"}`);
+    const hlsUrl = `${LOCAL}/hls?u=${encodeURIComponent(info.video_url)}`;
+    const r1 = await fetch(hlsUrl);
+    const txt = await r1.text();
+    steps.push(`hls:${r1.status}/${txt.length}/${txt.startsWith("#EXTM3U") ? "m3u8" : "bad"}`);
+    const keyLine = txt.split("\n").find((l) => l.startsWith("#EXT-X-KEY"));
+    if (keyLine) {
+      const m = keyLine.match(/URI="([^"]+)"/);
+      if (m) {
+        const rustUrl = m[1];
+        steps.push(`rustUrl:${rustUrl.slice(0, 60)}`);
+        // A/B：用 JS 重新编码同一条上游地址
+        const inner = decodeURIComponent(rustUrl.split("?u=")[1] || "");
+        steps.push(`inner:${inner.slice(0, 50)}`);
+        try {
+          const rk = await fetch(rustUrl);
+          const bk = await rk.arrayBuffer();
+          steps.push(`keyRust:${rk.status}/${bk.byteLength}`);
+        } catch (e) { steps.push(`keyRust:throw:${(e as Error).message.slice(0, 30)}`); }
+        try {
+          const rk2 = await fetch(`${LOCAL}/seg?u=${encodeURIComponent(inner)}`);
+          const bk2 = await rk2.arrayBuffer();
+          steps.push(`keyJs:${rk2.status}/${bk2.byteLength}`);
+        } catch (e) { steps.push(`keyJs:throw:${(e as Error).message.slice(0, 30)}`); }
+      }
+    }
+    const segLine = txt.split("\n").find((l) => l && !l.startsWith("#") && l.includes("/seg?u="));
+    if (segLine) {
+      try {
+        const r2 = await fetch(segLine.trim());
+        const buf = await r2.arrayBuffer();
+        steps.push(`seg:${r2.status}/${buf.byteLength}`);
+      } catch (e) { steps.push(`seg:throw:${(e as Error).message.slice(0, 40)}`); }
+    } else steps.push("seg:no-line");
+  } catch (e) {
+    steps.push(`err:${(e as Error).message.slice(0, 60)}`);
+  }
+  return steps.join(" | ");
+}
+
+/* ── 格式化 ─────────────────────────────────────────────── */
+
+export const fmt = (n: number | undefined) => {
+  const v = Number(n) || 0;
+  if (v >= 100_000_000) return `${(v / 100_000_000).toFixed(1).replace(/\.0$/, "")}亿`;
+  if (v >= 10_000) return `${(v / 10_000).toFixed(1).replace(/\.0$/, "")}万`;
+  return String(v);
+};
+
+export const fmtTime = (s: number) => {
+  if (!isFinite(s) || s < 0) s = 0;
+  const m = Math.floor(s / 60);
+  const ss = Math.floor(s % 60);
+  return `${m}:${ss.toString().padStart(2, "0")}`;
+};
+
+export const dur = (s?: number | string) => {
+  const n = Number(s) || 0;
+  if (n <= 0) return "";
+  const m = Math.floor(n / 60);
+  const ss = n % 60;
+  return `${m}:${String(ss).padStart(2, "0")}`;
+};
+
+/** 非 m3u8 媒体（mp4 等）走 /seg 原样透传 */
+export function directMedia(url: string): string {
+  return `${LOCAL}/seg?u=${encodeURIComponent(url)}`;
+}
+
+/** 按扩展名选择代理方式：m3u8 → 播放列表改写；其它 → 原样透传 */
+export function mediaUrl(url: string): string {
+  return /\.m3u8(\?|$)/i.test(url) ? playlist(url) : directMedia(url);
+}
