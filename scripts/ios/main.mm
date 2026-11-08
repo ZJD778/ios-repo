@@ -158,9 +158,12 @@ static void HGScheduleBackgroundRefresh(void) {
 
 __attribute__((constructor))
 static void HGSetupBackground(void) {
-  /* UIDevice 方向通知默认不产生；不打开这一句，下面那条观察者永远不会触发。 */
-  [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
-  dispatch_async(dispatch_get_main_queue(), ^{ HGScheduleBackgroundRefresh(); });
+  dispatch_async(dispatch_get_main_queue(), ^{
+    /* 主 runloop 起来之后再开方向通知：constructor 阶段 UIDevice 可能还没初始化完，
+       而且不发这一句 UIDeviceOrientationDidChangeNotification 永远不会触发。 */
+    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+    HGScheduleBackgroundRefresh();
+  });
 
   /* 回前台、旋转后都重新刷一遍（几何变了，backdrop 要重新拉满）。 */
   NSArray<NSNotificationName> *events = @[
