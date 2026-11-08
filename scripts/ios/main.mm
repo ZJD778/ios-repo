@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <dispatch/dispatch.h>
 #include "bindings/bindings.h"
 
 /* HGhub iOS 原生入口。
@@ -157,6 +158,8 @@ static void HGScheduleBackgroundRefresh(void) {
 
 __attribute__((constructor))
 static void HGSetupBackground(void) {
+  /* UIDevice 方向通知默认不产生；不打开这一句，下面那条观察者永远不会触发。 */
+  [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
   dispatch_async(dispatch_get_main_queue(), ^{ HGScheduleBackgroundRefresh(); });
 
   /* 回前台、旋转后都重新刷一遍（几何变了，backdrop 要重新拉满）。 */
