@@ -111,9 +111,9 @@ fi
 # iOS 的 AVFoundation 不认 hg:// 自定义协议，视频走 http://127.0.0.1:<port>。
 # 两层例外都给上（ATS 本身已豁免 127.0.0.1，但不同系统版本的判定有差异，
 # NSAllowsLocalNetworking 兜底不会放宽公网）：
-#   NSAllowsLocalNetworking       —— 放行本地/回环地址
-#   NSAllowsArbitraryLoadsInMedia —— 专门豁免 AVFoundation 的媒体加载（iOS 10+），
-#                                    <video> 拉 HLS 走的就是这条路径
+#   NSAllowsLocalNetworking          —— 放行本地/回环地址
+#   NSAllowsArbitraryLoadsForMedia   —— 专门豁免 AVFoundation 的媒体加载（iOS 10+），
+#                                       <video> 拉 HLS 走的就是这条路径
 # 127.0.0.1 属于 loopback，不触发「查找本地网络设备」权限弹窗；
 # 千万不要改回 *.localhost —— 那会被当成 mDNS 探测，用户一拒就永久黑屏。
 echo "==> Patching Info.plist (ATS local networking)"
