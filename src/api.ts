@@ -51,15 +51,38 @@ export const platformName =
  *  Rust 侧 `src-tauri/src/media.rs` 里改写 m3u8 用的 scheme 必须与此一致。 */
 export const LOCAL = isMacos || isIOS ? "hg://localhost" : "http://hg.localhost";
 
-/** src 是否已是本地协议地址（避免在详情页把代理地址再包一层） */
-export const isLocalMedia = (src: string) => src.startsWith(`${LOCAL}/`);
+/** 视频（HLS 播放列表 / 分片 / 直链）用的基址，通常与 [`LOCAL`] 相同。
+ *
+ *  iOS 例外：`<video>` 拉 HLS 时请求由 AVFoundation 直接发出，不经过 WKWebView
+ *  的 `WKURLSchemeHandler`，`hg://localhost/hls?u=…` 永远等不到响应 —— 症状正是
+ *  「封面墙正常、点开视频无限转圈」。所以 iOS 的视频地址改走 Rust 侧起的回环
+ *  HTTP 服务（`http://127.0.0.1:<port>`，见 `src-tauri/src/local_http.rs`），
+ *  端口在启动时由 `media_origin` 命令注入。
+ *
+ *  图片仍走 `hg://`（WKWebView 网络栈认它，且已验证可用），这样即使回环服务
+ *  出问题，封面墙也不会一起挂掉。 */
+export let MEDIA = LOCAL;
+
+/** 启动时由 main.tsx 调用，把 Rust 报上来的回环基址写进来。 */
+export function setMediaOrigin(origin: string) {
+  if (origin && origin !== MEDIA) MEDIA = origin;
+}
+
+/** src 是否已是本地代理地址（避免在详情页把代理地址再包一层） */
+export const isLocalMedia = (src: string) =>
+  src.startsWith(`${LOCAL}/`) || src.startsWith(`${MEDIA}/`);
 
 /** 封面：经本地协议解密（站点封面是 AES 密文）。 */
 export const cover = (url?: string, _w = 480) =>
   url ? `${LOCAL}/img?u=${encodeURIComponent(url)}` : "";
 
-/** 播放列表：经本地协议改写分片地址，规避 CORS 与防盗链。 */
-export const playlist = (url: string) => `${LOCAL}/hls?u=${encodeURIComponent(url)}`;
+/** 播放列表：经本地代理改写分片地址，规避 CORS 与防盗链。
+ *
+ *  路径刻意带 `.m3u8` 后缀：iOS 的原生播放器（AVFoundation）对 `src` 结尾没有
+ *  m3u8 字样时，偶发把它当普通渐进式文件处理，直接报「无法播放」。RFC 上
+ *  MIME 已足够，但加后缀是零成本的确定性提升 —— Rust 侧 `/hls` 与
+ *  `/hls.m3u8` 是同一个分支。 */
+export const playlist = (url: string) => `${MEDIA}/hls.m3u8?u=${encodeURIComponent(url)}`;
 
 /* ── 调用封装 ───────────────────────────────────────────── */
 
@@ -164,7 +187,7 @@ export async function selfTest(): Promise<string> {
   try {
     const info = await api.play(117, 3);
     steps.push(`play:${info?.video_url ? "ok" : "empty"}`);
-    const hlsUrl = `${LOCAL}/hls?u=${encodeURIComponent(info.video_url)}`;
+    const hlsUrl = `${MEDIA}/hls?u=${encodeURIComponent(info.video_url)}`;
     const r1 = await fetch(hlsUrl);
     const txt = await r1.text();
     steps.push(`hls:${r1.status}/${txt.length}/${txt.startsWith("#EXTM3U") ? "m3u8" : "bad"}`);
@@ -183,7 +206,7 @@ export async function selfTest(): Promise<string> {
           steps.push(`keyRust:${rk.status}/${bk.byteLength}`);
         } catch (e) { steps.push(`keyRust:throw:${(e as Error).message.slice(0, 30)}`); }
         try {
-          const rk2 = await fetch(`${LOCAL}/seg?u=${encodeURIComponent(inner)}`);
+          const rk2 = await fetch(`${MEDIA}/seg?u=${encodeURIComponent(inner)}`);
           const bk2 = await rk2.arrayBuffer();
           steps.push(`keyJs:${rk2.status}/${bk2.byteLength}`);
         } catch (e) { steps.push(`keyJs:throw:${(e as Error).message.slice(0, 30)}`); }
@@ -229,7 +252,7 @@ export const dur = (s?: number | string) => {
 
 /** 非 m3u8 媒体（mp4 等）走 /seg 原样透传 */
 export function directMedia(url: string): string {
-  return `${LOCAL}/seg?u=${encodeURIComponent(url)}`;
+  return `${MEDIA}/seg?u=${encodeURIComponent(url)}`;
 }
 
 /** 按扩展名选择代理方式：m3u8 → 播放列表改写；其它 → 原样透传 */

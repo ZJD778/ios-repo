@@ -23,6 +23,23 @@ pub const LOCAL_ORIGIN: &str = "http://hg.localhost";
 #[cfg(not(any(target_os = "windows", target_os = "android")))]
 pub const LOCAL_ORIGIN: &str = "hg://localhost";
 
+/// 运行时媒体基址。
+///
+/// 除 iOS 外与 [`LOCAL_ORIGIN`] 完全相同。iOS 上视频必须走回环 HTTP：
+/// `<video>` 拉 HLS 时由 AVFoundation 发请求，它不经过 WKWebView 的
+/// `WKURLSchemeHandler`，`hg://localhost/hls?u=…` 永远不会有响应 —— 症状就是
+/// 「封面墙正常、点开视频无限转圈」。回环服务由 [`crate::local_http`] 提供。
+pub fn local_origin() -> String {
+    #[cfg(target_os = "ios")]
+    {
+        let o = crate::local_http::origin();
+        if !o.is_empty() {
+            return o;
+        }
+    }
+    LOCAL_ORIGIN.to_string()
+}
+
 const IMG_KEY: &[u8] = b"f5d965df75336270";
 const IMG_IV: &[u8] = b"97b60394abc2fbe1";
 
@@ -240,7 +257,7 @@ pub async fn handle(path: &str, query: &str, origin: &str) -> Response<Vec<u8>> 
             Ok((kind, bytes)) => respond(200, &kind, bytes.as_ref().clone(), "public, max-age=86400"),
             Err(e) => respond(502, "text/plain", e.into_bytes(), "no-store"),
         },
-        "/hls" => match load_playlist(&target, origin).await {
+        "/hls" | "/hls.m3u8" => match load_playlist(&target, origin).await {
             Ok(text) => respond(
                 200,
                 "application/vnd.apple.mpegurl",

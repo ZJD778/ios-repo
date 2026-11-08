@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Build an UNSIGNED arm64 device IPA for SideStore / AltStore sideloading.
+# Build an UNSIGNED arm64 device IPA for TrollStore / SideStore / AltStore.
 #
 # Why this exists:
 #   `tauri ios build` insists on archive + export signing, which requires a
-#   logged-in Apple account and a provisioning profile. SideStore re-signs with
-#   your own Apple ID anyway, so the IPA itself does not need to be signed.
-#   This script links a device build with CODE_SIGNING_ALLOWED=NO and wraps it
-#   into the standard Payload/*.app layout.
+#   logged-in Apple account and a provisioning profile. TrollStore (and
+#   SideStore) sign on-device anyway, so the IPA itself does not need to be
+#   signed. This script links a device build with CODE_SIGNING_ALLOWED=NO and
+#   wraps it into the standard Payload/*.app layout.
 #
-# Two non-obvious requirements:
+# Three non-obvious requirements:
 #   1. `--features tauri/custom-protocol` is required. Without it Tauri's
 #      codegen takes the `dev` branch (devUrl is configured) and embeds EMPTY
 #      assets, so the app would launch to a blank screen on a real device.
@@ -16,10 +16,15 @@
 #      the Tauri CLI over a local WebSocket. It only works when the CLI itself
 #      is driving the build, so we temporarily replace it with a no-op and
 #      restore the project file afterwards (trap guarantees cleanup).
+#   3. The iOS native entry (scripts/ios/main.mm) must replace the template one,
+#      and Info.plist must allow loopback HTTP — otherwise the video player
+#      blacks out (white bar + AVFoundation refusing hg:// URLs).
+#      Both patches are verified after linking; a missing symbol fails the build
+#      instead of silently producing a broken IPA.
 #
 # Usage:  pnpm ios:ipa
-#         ./scripts/build-ios-ipa.sh
-#         IPA_OUT=/path/to/custom.ipa ./scripts/build-ios-ipa.sh
+#         bash scripts/build-ios-ipa.sh
+#         IPA_OUT=/path/to/custom.ipa bash scripts/build-ios-ipa.sh
 #
 # Environment:
 #   IPA_OUT                 output path (default: ./HGhub-unsigned.ipa)
@@ -44,7 +49,7 @@ if [ ! -f "$PBX" ]; then
   echo "       Run 'pnpm tauri ios init' once before using this script." >&2
   exit 1
 fi
-for cmd in pnpm cargo rustup xcodebuild python3; do
+for cmd in pnpm cargo rustup xcodebuild python3 plutil; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "ERROR: '$cmd' not found in PATH" >&2; exit 1; }
 done
 
@@ -79,9 +84,52 @@ done
 
 # --- iOS 原生入口补丁 -----------------------------------------------------
 # gen/apple 被 .gitignore，重新 `tauri ios init` 会还原成默认 main.mm。
-# 每次构建前把模板复制过去，保证「底部白色安全区」修复始终生效。
+# Tauri 模板里 main.mm 的位置随版本变过，所以把 gen/apple 下所有 main.mm 都覆盖，
+# 一个都找不到就报错（宁可失败，也不要产出一个白条还在的 IPA）。
 echo "==> Applying iOS native entry patch"
-cp "$ROOT/scripts/ios/main.mm" "$GEN/Sources/huangguo-client/main.mm"
+MAIN_MM_COUNT=0
+while IFS= read -r f; do
+  cp "$ROOT/scripts/ios/main.mm" "$f"
+  MAIN_MM_COUNT=$((MAIN_MM_COUNT + 1))
+  echo "    patched: ${f#$GEN/}"
+done < <(find "$GEN" -name 'main.mm' -type f)
+
+if [ "$MAIN_MM_COUNT" -eq 0 ]; then
+  echo "ERROR: no main.mm found under $GEN" >&2
+  echo "       Your Tauri CLI version generates a different iOS entry." >&2
+  find "$GEN" -name '*.mm' -o -name '*.m' -o -name '*.swift' | head -20 >&2 || true
+  exit 1
+fi
+
+# --- Info.plist：放行回环 HTTP --------------------------------------------
+# iOS 的 AVFoundation 不认 hg:// 自定义协议，视频走 http://127.0.0.1:<port>。
+# 两层例外都给上（ATS 本身已豁免 127.0.0.1，但不同系统版本的判定有差异，
+# NSAllowsLocalNetworking 兜底不会放宽公网）：
+#   NSAllowsLocalNetworking       —— 放行本地/回环地址
+#   NSAllowsArbitraryLoadsInMedia —— 专门豁免 AVFoundation 的媒体加载（iOS 10+），
+#                                    <video> 拉 HLS 走的就是这条路径
+# 127.0.0.1 属于 loopback，不触发「查找本地网络设备」权限弹窗；
+# 千万不要改回 *.localhost —— 那会被当成 mDNS 探测，用户一拒就永久黑屏。
+echo "==> Patching Info.plist (ATS local networking)"
+PLISTS="$(find "$GEN" -name 'Info.plist' -type f)"
+if [ -z "$PLISTS" ]; then
+  echo "ERROR: no Info.plist found under $GEN" >&2
+  exit 1
+fi
+while IFS= read -r plist; do
+  [ -n "$plist" ] || continue
+  /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInMedia bool true" "$plist"
+  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool false" "$plist"
+  # 强制 UIKit 用深色外观：系统默认背景、键盘、滚动条底衬都跟着变暗，
+  # 不再有「某层忘记刷色就是一条白」的漏网之鱼。应用自己的浅色主题由前端
+  # localStorage 控制，与 UIKit 外观无关。
+  /usr/libexec/PlistBuddy -c "Delete :UIUserInterfaceStyle" "$plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :UIUserInterfaceStyle string Dark" "$plist"
+  echo "    patched: ${plist#$GEN/}"
+done <<< "$PLISTS"
 
 # --- frontend + Rust device library ---------------------------------------
 echo "==> Building frontend"
@@ -141,6 +189,34 @@ APP="$DD/Build/Products/release-iphoneos/HGhub.app"
 grep -aq "/assets/index-" "$APP/HGhub" || {
   echo "ERROR: frontend assets missing from final binary" >&2; exit 1; }
 
+# --- 校验原生补丁真的进了二进制 -------------------------------------------
+echo "==> Verifying native patches"
+# release 档 strip=true，符号名保不住，所以查「只在补丁里出现」的字符串字面量：
+#   HGhubBackdrop        → scripts/ios/main.mm 的垫底层（白条修复）
+#   Accept-Ranges: bytes → src-tauri/src/local_http.rs 的回环服务
+if ! strings "$APP/HGhub" | grep -q "HGhubBackdrop"; then
+  echo "ERROR: scripts/ios/main.mm patch is missing from the binary" >&2
+  echo "       The white bar at the bottom will still be there." >&2
+  exit 1
+fi
+echo "    ok: main.mm (backdrop patch)"
+
+if ! strings "$APP/HGhub" | grep -q "Accept-Ranges: bytes"; then
+  echo "ERROR: src-tauri/src/local_http.rs is not compiled in" >&2
+  echo "       Video will spin forever (AVFoundation cannot use hg://)." >&2
+  exit 1
+fi
+echo "    ok: local_http"
+
+# Info.plist 里的 ATS 例外必须落在最终 app bundle 内（Xcode 会重新生成 plist，
+# 所以这里核对产物而不是源文件）。
+if ! /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" \
+      "$APP/Info.plist" 2>/dev/null | grep -qi true; then
+  echo "ERROR: NSAllowsLocalNetworking missing from built Info.plist" >&2
+  exit 1
+fi
+echo "    ok: NSAllowsLocalNetworking"
+
 # --- wrap into IPA --------------------------------------------------------
 echo "==> Packaging IPA"
 WORK="$(mktemp -d)"
@@ -155,4 +231,4 @@ echo
 echo "IPA ready: $OUT"
 ls -lh "$OUT"
 lipo -info "$APP/HGhub"
-echo "Unsigned on purpose - let SideStore sign it with your Apple ID."
+echo "Unsigned on purpose - TrollStore / SideStore will sign it on device."

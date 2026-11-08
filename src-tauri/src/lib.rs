@@ -1,6 +1,8 @@
 mod api;
 #[cfg(target_os = "ios")]
 mod ios;
+#[cfg(target_os = "ios")]
+mod local_http;
 mod lines;
 mod media;
 mod net;
@@ -35,6 +37,10 @@ pub fn run() {
                 let state: tauri::State<Api> = app.state();
                 state.session.bind(dir);
             }
+            // iOS：起回环 HTTP 服务给 <video> 用（AVFoundation 不认 hg:// 自定义协议）。
+            // 端口随机，前端启动时通过 media_origin 命令取走。
+            #[cfg(target_os = "ios")]
+            local_http::start();
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("hg", |_app, request, responder| {
@@ -44,12 +50,18 @@ pub fn run() {
             // 自定义协议基址随平台不同，统一定义在 media::LOCAL_ORIGIN
             // （Windows/Android 是 http://<scheme>.localhost，macOS/iOS/Linux 是 <scheme>://localhost）。
             // 它同时是 m3u8 分片/key 改写用的前缀，必须与前端 src/api.ts 的 LOCAL 一致。
+            //
+            // iOS 上视频另走回环 HTTP（AVFoundation 不认自定义协议），
+            // 这里用 media::local_origin()，服务起来时它就是 127.0.0.1 基址，
+            // 未起来时退回 hg://localhost。图片始终能用自定义协议。
             tauri::async_runtime::spawn(async move {
-                let resp = media::handle(&path, &query, media::LOCAL_ORIGIN).await;
+                let origin = media::local_origin();
+                let resp = media::handle(&path, &query, &origin).await;
                 responder.respond(resp);
             });
         })
         .invoke_handler(tauri::generate_handler![
+            api::media_origin,
             api::app_boot,
             api::debug_log,
             api::net_diag,

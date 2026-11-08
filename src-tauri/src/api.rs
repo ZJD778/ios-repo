@@ -202,6 +202,14 @@ fn open_external(_url: &str) -> Result<(), String> {
 
 /* ───────────────────────── 会话 ───────────────────────── */
 
+/// 前端启动时取媒体基址：iOS 是 `http://127.0.0.1:<port>`（回环服务随机端口），
+/// 其余平台是自定义协议基址。视频必须走这个地址 —— iOS 的 AVFoundation 不认
+/// `hg://`，`<video>` 会永远转圈。见 `src-tauri/src/local_http.rs`。
+#[tauri::command]
+pub async fn media_origin() -> Result<String, String> {
+    Ok(crate::media::local_origin())
+}
+
 #[tauri::command]
 pub async fn app_boot(state: State<'_, Api>) -> Result<Value, String> {
     Ok(json!({
