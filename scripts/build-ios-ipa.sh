@@ -78,8 +78,14 @@ else
   export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
 fi
 
+# 不要写 `rustup target list --installed | grep -qx "$t"`：pipefail 下 grep -q
+# 命中即关管道，rustup 吃 SIGPIPE 后整条管道返回 141，会被误判成「没装」。
+INSTALLED_TARGETS="$(rustup target list --installed)"
 for t in aarch64-apple-ios; do
-  rustup target list --installed | grep -qx "$t" || rustup target add "$t"
+  case "$INSTALLED_TARGETS" in
+    *"$t"*) ;;
+    *) rustup target add "$t" ;;
+  esac
 done
 
 # --- iOS 原生入口补丁 -----------------------------------------------------
@@ -121,8 +127,11 @@ while IFS= read -r plist; do
   /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$plist" >/dev/null 2>&1 || true
   /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$plist"
   /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$plist"
-  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInMedia bool true" "$plist"
-  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool false" "$plist"
+  # iOS 10+ 的键名是 NSAllowsArbitraryLoadsForMedia（iOS 9 的 InMedia 已废弃），
+  # 专门豁免 AVFoundation 的媒体加载 —— <video> 拉 HLS 走的就是这条路径。
+  /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsForMedia bool true" "$plist"
+  # 刻意不写 NSAllowsArbitraryLoads：它的存在会让上面的细粒度键在 iOS 10+ 失效，
+  # 而全局放开 HTTPS 既不必要也不安全。这里只放开回环 + 媒体两条。
   # 强制 UIKit 用深色外观：系统默认背景、键盘、滚动条底衬都跟着变暗，
   # 不再有「某层忘记刷色就是一条白」的漏网之鱼。应用自己的浅色主题由前端
   # localStorage 控制，与 UIKit 外观无关。
@@ -194,28 +203,55 @@ echo "==> Verifying native patches"
 # release 档 strip=true，符号名保不住，所以查「只在补丁里出现」的字符串字面量：
 #   HGhubBackdrop        → scripts/ios/main.mm 的垫底层（白条修复）
 #   Accept-Ranges: bytes → src-tauri/src/local_http.rs 的回环服务
-if ! strings "$APP/HGhub" | grep -q "HGhubBackdrop"; then
+#
+# 直接用 grep -a 扫 Mach-O，不要写成 `strings ... | grep -q`：
+# grep -q 命中后立刻关管道退出，strings 还在往管道里写，被 SIGPIPE 打断后
+# 报 "strings: failed to flush output"；脚本开了 pipefail，这条管道整体算失败，
+# 于是「字符串明明在二进制里」却被判成缺失（Xcode 16.4 上稳定复现）。
+# 同时把 strings 结果落盘一次，失败时能直接看出二进制里到底有什么。
+STRINGS_DUMP="$TMP/hghub-strings.txt"
+strings -a "$APP/HGhub" > "$STRINGS_DUMP" 2>/dev/null || true
+echo "    binary strings: $(wc -l < "$STRINGS_DUMP" | tr -d ' ') lines"
+
+if ! grep -aq "HGhubBackdrop" "$APP/HGhub"; then
   echo "ERROR: scripts/ios/main.mm patch is missing from the binary" >&2
   echo "       The white bar at the bottom will still be there." >&2
+  echo "       ---- diagnostics (main.mm / ObjC symbols) ----" >&2
+  grep -aiE "Backdrop|HGApply|HGSetup|UGhub|HGhub" "$STRINGS_DUMP" | sort -u | head -20 >&2 || true
+  echo "       ---- end ----" >&2
   exit 1
 fi
 echo "    ok: main.mm (backdrop patch)"
 
-if ! strings "$APP/HGhub" | grep -q "Accept-Ranges: bytes"; then
+if ! grep -aq "Accept-Ranges: bytes" "$APP/HGhub"; then
   echo "ERROR: src-tauri/src/local_http.rs is not compiled in" >&2
   echo "       Video will spin forever (AVFoundation cannot use hg://)." >&2
+  echo "       ---- diagnostics (local_http) ----" >&2
+  grep -aiE "Accept-Ranges|Content-Range|127\.0\.0\.1" "$STRINGS_DUMP" | sort -u | head -20 >&2 || true
+  echo "       ---- end ----" >&2
   exit 1
 fi
 echo "    ok: local_http"
 
 # Info.plist 里的 ATS 例外必须落在最终 app bundle 内（Xcode 会重新生成 plist，
-# 所以这里核对产物而不是源文件）。
-if ! /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" \
-      "$APP/Info.plist" 2>/dev/null | grep -qi true; then
-  echo "ERROR: NSAllowsLocalNetworking missing from built Info.plist" >&2
+# 所以这里核对产物而不是源文件）。同样避开 `cmd | grep -q`：pipefail 下
+# grep -q 提前退出会让上游吃 SIGPIPE，命令替换的退出码变成 141。
+ATS_LOCAL="$(/usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" \
+  "$APP/Info.plist" 2>/dev/null || true)"
+if [ "${ATS_LOCAL}" != "true" ]; then
+  echo "ERROR: NSAllowsLocalNetworking missing from built Info.plist (got '${ATS_LOCAL}')" >&2
+  /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$APP/Info.plist" >&2 2>/dev/null || true
   exit 1
 fi
 echo "    ok: NSAllowsLocalNetworking"
+
+# 深色外观兜底：系统背景 / 键盘 / 滚动条底衬全变暗，白条没有藏身处。
+UI_STYLE="$(/usr/libexec/PlistBuddy -c "Print :UIUserInterfaceStyle" "$APP/Info.plist" 2>/dev/null || true)"
+if [ "${UI_STYLE}" != "Dark" ]; then
+  echo "ERROR: UIUserInterfaceStyle is '${UI_STYLE}', expected Dark" >&2
+  exit 1
+fi
+echo "    ok: UIUserInterfaceStyle=Dark"
 
 # --- wrap into IPA --------------------------------------------------------
 echo "==> Packaging IPA"
