@@ -538,3 +538,50 @@ html.theme-light .article-body { color: rgba(20,24,30,.82); }
 .hg-tabbar button:focus-visible,
 .hg-player-ui button:focus,
 .hg-player-ui button:focus-visible { outline: none; }
+
+/* ===================================================================
+   iPhone 13 Pro Max 适配（428 × 926pt @3x，刘海 47pt / Home 条 34pt）
+
+   env(safe-area-inset-*) 在 WKWebView 全屏延伸时给出的是真实值，
+   所以这里不再写死像素，全部基于安全区变量推导，换机型自动跟随。
+   =================================================================== */
+html {
+  /* iOS 横竖屏切换时 WebKit 会自作主张放大字号，锁住它 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* 惯性滚动 + 橡皮筋只留在该滚的地方；页面纵向整体不滚（移动端是分层壳） */
+.scroll-y, .scroll-x {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* —— 底栏：左右安全区（横屏时刘海在侧边）—— */
+.hg-tabbar {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+/* 按下反馈：49pt 高的 item 用整块按压比缩放图标更接近原生 */
+.hg-tabbar button:active > span:first-child { transform: scale(.88); }
+.hg-tabbar button > span:first-child { transition: transform .16s cubic-bezier(.2,0,0,1); }
+
+/* —— 内容页底部留白 ——
+   桌面端没有底部 TabBar，只留原来的 96px 呼吸位；
+   移动端（plat-android = Android + iOS 共用布局）要避开
+   「底栏 49pt + Home 条 34pt」，再留 12pt：合计 sab + 61px。
+   之前各页手写 pb-24(96px)，正好贴着底栏上沿，最后一行卡片看起来被压住。 */
+.pad-tabbar { padding-bottom: 96px; }
+.plat-android .pad-tabbar { padding-bottom: calc(var(--sab, 0px) + 61px); }
+
+/* —— 移动端页面标题：24px 在 428pt 宽上偏轻，统一到 26px —— */
+.hg-page-title { font-size: 26px; font-weight: 700; line-height: 1; letter-spacing: -.3px; }
+
+/* —— 触控目标：iOS HIG 要求 44×44pt 最小可点区域 —— */
+.hg-tap-44 { min-width: 44px; min-height: 44px; }
+
+/* —— 播放页浮层：iOS 上按钮要更大更好点，图标本身放大即可 —— */
+.hg-player-ui .hg-chip,
+.hg-player-ui .hg-chip-strong { -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+
+/* —— 底部弹层：iPhone 上圆角大一点更像系统 Sheet —— */
+.plat-android .hg-sheet-surface { border-top-left-radius: 20px; border-top-right-radius: 20px; }

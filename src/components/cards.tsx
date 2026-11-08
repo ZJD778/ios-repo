@@ -4,37 +4,45 @@ import type { VideoCard } from "../types";
 import { IHeartF, IPlayF } from "../icons";
 import { Img } from "./ui";
 
-/* ——— 瀑布流卡片 ——— */
+/* ——— 瀑布流卡片 ———
+ *  列宽 193pt（428pt / 2 列 - 8pt 间距）。字号按这个宽度重算：
+ *  标题 12.5px、角标 10px —— 原来是 11.5/9px，在 @3x 屏上明显偏小，
+ *  也不符合 iOS 正文最小 11pt 的观感。角标内边距同步放宽，不再挤成一团。
+ */
 export function WaterfallCard({ v, onOpen }: { v: VideoCard; onOpen: () => void }) {
   const ratio = 1.32;
   return (
     <button onClick={onOpen}
-      className="relative w-full overflow-hidden text-left bg-s1 elev-1 pressable block rounded-(--r-sm)"
+      className="relative w-full overflow-hidden text-left bg-s1 elev-1 pressable block rounded-(--r-md)"
       style={{ paddingTop: `${ratio * 100}%` }}>
       <Img src={v.cover} />
       <div className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
-      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold brand-grad elev-1">
+      <span className="absolute top-2 left-2 px-2 py-1 rounded-md text-[10px] font-bold brand-grad elev-1">
         {v.is_finished ? "已完结" : `更新至${v.episode_count}集`}
       </span>
-      <span className="absolute top-1.5 right-1.5 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-black/45 backdrop-blur-sm text-[9px] font-semibold text-white/90">
-        <IPlayF size={9} />{fmt(v.hot)}
+      <span className="absolute top-2 right-2 flex items-center gap-0.5 px-2 py-1 rounded-md bg-black/45 backdrop-blur-sm text-[10px] font-semibold text-white/90">
+        <IPlayF size={10} />{fmt(v.hot)}
       </span>
-      <div className="absolute inset-x-0 bottom-0 p-2">
-        <div className="text-[11.5px] font-medium text-white leading-snug clamp-2 tsh">{v.title}</div>
-        <div className="flex items-center justify-between mt-1">
-          <span className="text-[9.5px] text-white/65 truncate max-w-[60%]">{v.author?.name || "黄果短剧"}</span>
-          <span className="flex items-center gap-0.5 text-[9.5px] text-white/75"><IHeartF size={10} className="text-white/70" />{fmt(v.like_count)}</span>
+      <div className="absolute inset-x-0 bottom-0 p-2.5">
+        <div className="text-[12.5px] font-medium text-white leading-snug clamp-2 tsh">{v.title}</div>
+        <div className="flex items-center justify-between mt-1.5">
+          <span className="text-[10.5px] text-white/65 truncate max-w-[60%]">{v.author?.name || "黄果短剧"}</span>
+          <span className="flex items-center gap-0.5 text-[10.5px] text-white/75"><IHeartF size={11} className="text-white/70" />{fmt(v.like_count)}</span>
         </div>
       </div>
     </button>
   );
 }
 
-/* ——— 近无缝瀑布流 ——— */
-export function Masonry({ videos, onOpen, wide = false, gap = "gap-1" }: {
+/* ——— 近无缝瀑布流 ———
+ *  移动端固定 2 列：428pt 宽下每列约 193pt（扣 16pt gap），
+ *  3:4 封面出图 193×254pt，正好是 iPhone 上刷剧单的舒适尺寸。
+ *  原来 gap-1（4pt）两列贴得太紧，改为 gap-2（8pt），列间距才和有边距的页面呼吸位一致。
+ */
+export function Masonry({ videos, onOpen, wide = false, gap = "gap-2" }: {
   videos: VideoCard[]; onOpen: (v: VideoCard) => void; wide?: boolean; gap?: string;
 }) {
-  const mb = gap === "gap-1" ? "mb-1" : "mb-1.5";
+  const mb = gap === "gap-2" ? "mb-2" : "mb-1.5";
   return (
     <div className={`${wide ? "columns-3 xl:columns-4" : "columns-2"} ${gap} [column-fill:balance]`}>
       {videos.map((v) => (
@@ -46,10 +54,13 @@ export function Masonry({ videos, onOpen, wide = false, gap = "gap-1" }: {
   );
 }
 
-/* ——— 分类横向卡片 ——— */
+/* ——— 分类横向卡片 ———
+ *  宽 112pt：iPhone 13 Pro Max 逻辑宽 428pt，扣掉左右 16pt 边距剩 396pt，
+ *  能露出 3.5 张（半张露边提示可横滑）。原来 104pt 会露出 3.8 张，
+ *  边缘那张被切得只剩一条，看起来像渲染错误。 */
 export function RowCard({ v, onOpen }: { v: VideoCard; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="w-[104px] shrink-0 text-left snap-start pressable group">
+    <button onClick={onOpen} className="w-[112px] shrink-0 text-left snap-start pressable group">
       <div className="relative w-full rounded-(--r-sm) overflow-hidden bg-s1 elev-1" style={{ paddingTop: "133%" }}>
         <Img src={v.cover} />
         <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/75 to-transparent" />

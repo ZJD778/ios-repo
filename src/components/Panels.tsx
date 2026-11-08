@@ -31,10 +31,10 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
         </div>
       )}
       <div className="flex-1 scroll-y px-4 pb-4">
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-4 gap-2.5">
           {list.map((e) => (
             <button key={e.ep_num} onClick={() => onPick(e.ep_num)}
-              className={`h-10 rounded-(--r-sm) text-[12px] font-semibold pressable ${e.ep_num === current ? "bg-primary text-on-primary" : "bg-s3 text-on/80"}`}>
+              className={`h-11 rounded-(--r-md) text-[13px] font-semibold tabular-nums pressable ${e.ep_num === current ? "bg-primary text-on-primary" : "bg-s3 text-on/80"}`}>
               {e.ep_num}
             </button>
           ))}

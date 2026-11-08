@@ -20,8 +20,11 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = useRef(false);
 
+  /* 只在桌面自动聚焦。移动端（Android / iOS）一进搜索页就弹键盘会把整屏盖住，
+     iOS 上还会连带把 WebView 视口顶上去，收起键盘后页面回不到原位。 */
   useEffect(() => {
-    if (active && !/Android/i.test(navigator.userAgent)) inputRef.current?.focus();
+    const touch = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+    if (active && !touch) inputRef.current?.focus();
   }, [active]);
 
   const run = async (keyword: string, p: number) => {
@@ -63,20 +66,21 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
     <div className="absolute inset-0 bg-bg flex flex-col">
       {/* 搜索栏 */}
       <div className="shrink-0 px-4 pb-3 flex items-center gap-2.5" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
-        <form className="flex-1 flex items-center gap-2 h-11 rounded-(--r-ctl) bg-s3 px-3.5 focus-within:bg-s4 transition-colors"
+        <form className="flex-1 flex items-center gap-2.5 h-12 rounded-(--r-ctl) bg-s3 px-4 focus-within:bg-s4 transition-colors"
           onSubmit={(e) => { e.preventDefault(); submit(q); }}>
-          <ISearch size={17} className="text-mut shrink-0" />
+          <ISearch size={18} className="text-mut shrink-0" />
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索短剧、作者、题材…"
-            className="flex-1 min-w-0 bg-transparent text-[13.5px] text-on placeholder-dim outline-none" />
-          {q && <button type="button" onClick={() => { setQ(""); setSubmitted(""); setItems([]); }} className="w-5 h-5 rounded-full bg-s4 flex items-center justify-center text-mut pressable"><IClose size={11} /></button>}
+            enterKeyHint="search" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            className="flex-1 min-w-0 bg-transparent text-[15px] text-on placeholder-dim outline-none" />
+          {q && <button type="button" onClick={() => { setQ(""); setSubmitted(""); setItems([]); }} className="w-6 h-6 rounded-full bg-s4 flex items-center justify-center text-mut pressable"><IClose size={11} /></button>}
         </form>
         <button onClick={() => push({ kind: "ranks" })} aria-label="排行榜"
-          className="w-11 h-11 rounded-(--r-sm) flex items-center justify-center bg-primary text-on-primary pressable elev-2">
-          <ITrophy size={19} />
+          className="w-12 h-12 rounded-(--r-md) flex items-center justify-center bg-primary text-on-primary pressable elev-2">
+          <ITrophy size={20} />
         </button>
       </div>
 
-      <div className="flex-1 scroll-y px-4 pb-24">
+      <div className="flex-1 scroll-y pad-tabbar px-4">
         {!querying ? (
           <>
             {searchHist.length > 0 && (
@@ -176,16 +180,16 @@ export function RankPage({ onBack, wide }: { onBack: () => void; wide: boolean }
           <div className="px-2 mt-1 flex items-end justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><ITrophy size={20} /></span>
-                <span className="text-[24px] font-bold tracking-wide text-on">HG 热榜</span>
+                <span className="w-10 h-10 rounded-(--r-md) bg-pc text-on-pc flex items-center justify-center"><ITrophy size={21} /></span>
+                <span className="hg-page-title tracking-wide text-on">HG 热榜</span>
               </div>
-              <div className="text-[11px] text-mut mt-1">{meta.desc} · 每 10 分钟更新</div>
+              <div className="text-[11.5px] text-mut mt-1.5">{meta.desc} · 每 10 分钟更新</div>
             </div>
           </div>
-          <div className="flex bg-s3 rounded-(--r-ctl) p-1 mt-3">
+          <div className="flex bg-s3 rounded-(--r-ctl) p-1 mt-3.5">
             {RANK_TABS.map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
-                className={`flex-1 h-8 rounded-(--r-ctl) text-[12px] font-semibold transition-all ${tab === t.k ? "tonal elev-1" : "text-mut"}`}>{t.label}</button>
+                className={`flex-1 h-9 rounded-(--r-ctl) text-[13px] font-semibold transition-all ${tab === t.k ? "tonal elev-1" : "text-mut"}`}>{t.label}</button>
             ))}
           </div>
         </div>

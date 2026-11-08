@@ -51,10 +51,10 @@ export default function Settings({ onBack, wide }: { onBack: () => void; wide: b
           <div className="px-2 mt-1 flex items-end justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <span className="w-9 h-9 rounded-(--r-sm) bg-pc text-on-pc flex items-center justify-center"><ISettings size={20} strokeWidth={1.7} /></span>
-                <span className="text-[24px] font-bold tracking-wide text-on">设置</span>
+                <span className="w-10 h-10 rounded-(--r-md) bg-pc text-on-pc flex items-center justify-center"><ISettings size={21} strokeWidth={1.7} /></span>
+                <span className="hg-page-title tracking-wide text-on">设置</span>
               </div>
-              <div className="text-[11px] text-mut mt-1">外观 · 本地数据 · 诊断</div>
+              <div className="text-[11.5px] text-mut mt-1.5">外观 · 本地数据 · 诊断</div>
             </div>
           </div>
         </div>

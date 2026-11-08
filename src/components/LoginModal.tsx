@@ -51,19 +51,21 @@ export default function LoginModal() {
         ))}
       </div>
 
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-3">
         <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="账号"
-          className="h-10 px-3.5 rounded-(--r-sm) bg-s4 text-[13px] text-on placeholder-mut outline-none focus:ring-2 focus:ring-[var(--p-primary)]" />
+          autoCapitalize="off" autoCorrect="off" spellCheck={false} enterKeyHint="next"
+          className="h-12 px-4 rounded-(--r-md) bg-s4 text-[15px] text-on placeholder-mut outline-none focus:ring-2 focus:ring-[var(--p-primary)]" />
         <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="密码"
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-          className="h-10 px-3.5 rounded-(--r-sm) bg-s4 text-[13px] text-on placeholder-mut outline-none focus:ring-2 focus:ring-[var(--p-primary)]" />
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }} enterKeyHint="go"
+          className="h-12 px-4 rounded-(--r-md) bg-s4 text-[15px] text-on placeholder-mut outline-none focus:ring-2 focus:ring-[var(--p-primary)]" />
         {mode === "register" && (
           <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="邮箱（可选）"
-            className="h-10 px-3.5 rounded-(--r-sm) bg-s4 text-[13px] text-on placeholder-mut outline-none focus:ring-2 focus:ring-[var(--p-primary)]" />
+            type="email" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            className="h-12 px-4 rounded-(--r-md) bg-s4 text-[15px] text-on placeholder-mut outline-none focus:ring-2 focus:ring-[var(--p-primary)]" />
         )}
-        {err && <div className="text-[11.5px] text-danger">{err}</div>}
+        {err && <div className="text-[12px] text-danger">{err}</div>}
         <button onClick={submit} disabled={busy}
-          className="h-10 rounded-(--r-ctl) bg-primary text-on-primary text-[13px] font-bold pressable disabled:opacity-60">
+          className="h-12 mt-1 rounded-(--r-ctl) bg-primary text-on-primary text-[15px] font-bold pressable disabled:opacity-60">
           {busy ? "处理中…" : mode === "login" ? "登录" : "注册并登录"}
         </button>
       </div>

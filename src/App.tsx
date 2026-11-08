@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useStore, type Page, type Tab } from "./store";
 import { selfTest, isIOS } from "./api";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
@@ -14,42 +14,62 @@ import LoginModal from "./components/LoginModal";
 import { ToastHost } from "./components/ui";
 import { DesktopRail, DesktopTitleBar } from "./components/DesktopChrome";
 import ResizeHandles from "./components/ResizeHandles";
-import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF, Logo } from "./icons";
+import { IGrid, IGridF, IHome, IHomeF, ISearch, ISearchF, IUser, IUserF, Logo } from "./icons";
 
-/* ============ 底部标签栏（Android）—— 细瘦纯文字、低侵入 ============ */
+/** 底部 TabBar 内容高度（不含 Home 指示条安全区）。
+ *  49pt 是 iOS 原生 UITabBar 的标准高度，iPhone 13 Pro Max 上拇指刚好够到。
+ *  Feed 的底部信息区、内容页的 pb-* 都要按这个数算，所以提成常量。 */
+const TABBAR_H = 49;
+
+/* ============ 底部标签栏（移动端：Android + iOS）============ *  iPhone 13 Pro Max 适配要点：
+ *   - 逻辑分辨率 428×926pt、@3x；安全区 top 47pt（刘海）、bottom 34pt（Home 指示条）。
+ *   - 内容高度固定 49pt —— 就是 iOS 原生 UITabBar 的高度，符合拇指习惯，
+ *     也不会把 428pt 宽的底部压得太挤；34pt 的 Home 条区域只铺背景、不放控件。
+ *   - 四个 item 等分 428pt = 107pt 一个，远超 44pt 的触控下限。
+ *   - 图标 26pt + 标签 10pt，是 iOS 原生「图标在上、文字在下」的比例。
+ *     带填充图标的选中态与未选中态同尺寸，切换时不会左右跳动。
+ *   - 首页是沉浸视频 → 底栏压纯黑 + 无分隔线；其余页面用半透明深色 + 细线，
+ *     并且加 backdrop-blur，滚动内容从底下透上来时像毛玻璃（原生观感）。
+ */
 function TabBar() {
   const { tab, setTab, theme, chromeHidden } = useStore();
-  const items: { k: Tab; label: string }[] = [
-    { k: "home", label: "首页" },
-    { k: "search", label: "搜索" },
-    { k: "category", label: "分类" },
-    { k: "profile", label: "我的" },
+  const items: { k: Tab; label: string; icon: ReactNode; iconOn: ReactNode }[] = [
+    { k: "home", label: "首页", icon: <IHome size={25} />, iconOn: <IHomeF size={25} /> },
+    { k: "search", label: "搜索", icon: <ISearch size={25} />, iconOn: <ISearchF size={25} /> },
+    { k: "category", label: "分类", icon: <IGrid size={25} />, iconOn: <IGridF size={25} /> },
+    { k: "profile", label: "我的", icon: <IUser size={25} />, iconOn: <IUserF size={25} /> },
   ];
-  /* 细瘦纯文字分栏：只有选中项高亮，没有指示点。
-     首页是沉浸视频 → 底栏压深色；搜索/分类/我的 是浅色内容页 →
-     浅色主题下底栏跟着换成浅色，深色主题保持深色。 */
   const overVideo = tab === "home";
   const lightBar = !overVideo && theme === "light";
   return (
     <nav className={`hg-tabbar absolute bottom-0 inset-x-0 z-30 ${chromeHidden ? "is-hidden" : ""}`}
       style={{
         paddingBottom: "var(--sab, 0px)",
-        background: lightBar ? "rgba(250, 250, 250, .97)" : overVideo ? "#000000" : "#141414",
-        borderTop: lightBar ? "1px solid rgba(0,0,0,.08)" : overVideo ? "none" : "1px solid rgba(255,255,255,.07)",
-        boxShadow: lightBar ? "0 -2px 14px rgba(0,0,0,.05)" : "none",
+        background: lightBar
+          ? "rgba(249, 249, 249, .92)"
+          : overVideo
+            ? "rgba(0, 0, 0, .82)"
+            : "rgba(22, 22, 22, .92)",
+        backdropFilter: "saturate(180%) blur(22px)",
+        WebkitBackdropFilter: "saturate(180%) blur(22px)",
+        borderTop: lightBar
+          ? "0.5px solid rgba(0, 0, 0, .12)"
+          : overVideo
+            ? "none"
+            : "0.5px solid rgba(255, 255, 255, .10)",
       }}>
-      <div className="h-[40px] flex items-center px-1">
-        {items.map(({ k, label }) => {
+      <div className="h-[49px] flex items-stretch px-1">
+        {items.map(({ k, label, icon, iconOn }) => {
           const on = tab === k;
+          const tint = lightBar
+            ? (on ? "var(--p-primary)" : "rgba(0, 0, 0, .42)")
+            : (on ? "var(--p-primary)" : "rgba(255, 255, 255, .55)");
           return (
-            <button key={k} onClick={() => setTab(k)} className="flex-1 h-full flex items-center justify-center pressable">
-              <span className="text-[12.5px] leading-none transition-colors duration-200"
-                style={{
-                  fontWeight: on ? 700 : 400,
-                  color: lightBar
-                    ? (on ? "var(--p-primary)" : "rgba(0,0,0,.45)")
-                    : (on ? "#ffffff" : "rgba(255,255,255,.6)"),
-                }}>
+            <button key={k} onClick={() => setTab(k)} aria-label={label} aria-current={on ? "page" : undefined}
+              className="flex-1 flex flex-col items-center justify-center gap-[3px] pressable">
+              <span className="transition-colors duration-200" style={{ color: tint }}>{on ? iconOn : icon}</span>
+              <span className="text-[10px] leading-none tracking-[.1px] transition-colors duration-200"
+                style={{ color: tint, fontWeight: on ? 600 : 500 }}>
                 {label}
               </span>
             </button>
@@ -116,7 +136,9 @@ function AppBody() {
 
   const vis = (k: Tab) => (tab === k ? "absolute inset-0" : "absolute inset-0 invisible pointer-events-none");
   const pageActive = stack.length === 0 && !loginOpen;
-  const bottomInset = platform === "android" ? (fs ? 0 : 40) : 14;
+  /* 底栏高度：TabBar 固定 49pt 内容（iOS 原生 UITabBar 高度）。
+     内容页底部要留出的空间 = 底栏 49 + 一点呼吸位，否则最后一行卡片会被压住。 */
+  const bottomInset = platform === "android" ? (fs ? 0 : TABBAR_H) : 14;
   /* 栈页（从搜索/分类/我的进入的播放页、图文页）没有底栏，
      底部只让出安全区。之前多留了 20px，视频底边会露出一条
      「底栏」似的窄缝（底部的压暗渐变到不了屏幕最底）。 */

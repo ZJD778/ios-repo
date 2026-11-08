@@ -47,17 +47,19 @@ export default function Home({ active, bottomInset }: { active: boolean; bottomI
         <div className="absolute inset-0 flex items-center justify-center"><div className="w-9 h-9 spinner" /></div>
       )}
 
-      {/* 移动端：静音 + 搜索（压在视频上，固定白字 + 半透明黑底） */}
+      {/* 移动端：静音 + 搜索（压在视频上，固定白字 + 半透明黑底）
+          iPhone 13 Pro Max 上 --sat 是 47pt，+8 后按钮中心落在 71pt，
+          正好在刘海下沿，不压画面也不贴边。按钮 44pt 见方（iOS HIG 最小触控）。 */}
       {platform === "android" && !fs && !chromeHidden && (
-        <div className="absolute inset-x-0 z-20 flex items-center px-3 pointer-events-none hg-player-ui" style={{ top: "calc(var(--sat, 0px) + 6px)" }}>
-          <div className="ml-auto flex items-center gap-2">
+        <div className="absolute inset-x-0 z-20 flex items-center px-3 pointer-events-none hg-player-ui" style={{ top: "calc(var(--sat, 0px) + 8px)" }}>
+          <div className="ml-auto flex items-center gap-2.5">
             <button onClick={() => setMuted((m) => !m)} aria-label={muted ? "取消静音" : "静音"}
-              className="hg-chip pointer-events-auto w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
-              {muted ? <IVolMute size={17} /> : <IVol size={17} />}
+              className="hg-chip pointer-events-auto w-11 h-11 rounded-full flex items-center justify-center pressable elev-1">
+              {muted ? <IVolMute size={19} /> : <IVol size={19} />}
             </button>
             <button onClick={() => setTab("search")} aria-label="搜索"
-              className="hg-chip pointer-events-auto w-9 h-9 rounded-full flex items-center justify-center pressable elev-1">
-              <ISearch size={18} />
+              className="hg-chip pointer-events-auto w-11 h-11 rounded-full flex items-center justify-center pressable elev-1">
+              <ISearch size={20} />
             </button>
           </div>
         </div>

@@ -15,6 +15,9 @@ const S = (d: React.ReactNode, fill = false) =>
 export const IHome = S(<><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h5v-6h4v6h5V9.5" /></>);
 export const IHomeF = S(<path d="M12 2.6 2.8 10.2a1 1 0 0 0 .64 1.77H4v8.2A1.8 1.8 0 0 0 5.8 22H9.4v-5.6a2.6 2.6 0 0 1 5.2 0V22h3.6a1.8 1.8 0 0 0 1.8-1.8V12h.56a1 1 0 0 0 .64-1.77Z" />, true);
 export const ISearch = S(<><circle cx="11" cy="11" r="7" /><path d="m20.4 20.4-3.2-3.2" /></>);
+/* 搜索的实心版：底部 TabBar 选中态用（与 IHomeF / IGridF / IUserF 同一套视觉）。
+   圆 + 手柄都要 fill，所以整条 path 一次画完。 */
+export const ISearchF = S(<path d="M11 2.9a8.1 8.1 0 0 1 6.42 13.04l3.29 3.29a1.15 1.15 0 0 1-1.63 1.63l-3.29-3.29A8.1 8.1 0 1 1 11 2.9Zm0 2.3a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 0 0 0-11.6Z" />, true);
 const grid = <><rect x="3.5" y="3.5" width="7.2" height="7.2" rx="2.2" /><rect x="13.3" y="3.5" width="7.2" height="7.2" rx="2.2" /><rect x="3.5" y="13.3" width="7.2" height="7.2" rx="2.2" /><rect x="13.3" y="13.3" width="7.2" height="7.2" rx="2.2" /></>;
 export const IGrid = S(grid);
 export const IGridF = S(<><rect x="3" y="3" width="8" height="8" rx="2.4" /><rect x="13" y="3" width="8" height="8" rx="2.4" /><rect x="3" y="13" width="8" height="8" rx="2.4" /><rect x="13" y="13" width="8" height="8" rx="2.4" /></>, true);

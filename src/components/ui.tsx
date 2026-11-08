@@ -20,9 +20,38 @@ export function Avatar({ hue = 250, icon, name, size = 40, ring = false, classNa
   );
 }
 
+/* ——— iOS 键盘占位 ———
+ *  WKWebView 里软键盘弹出时，`window.innerHeight` 不变，只有 `visualViewport`
+ *  会缩小。底部弹层（Sheet）贴在 bottom-0，键盘一弹就被盖住，输入框完全看不见。
+ *  这里监听 visualViewport 算出「被键盘顶掉的高度」，把弹层整体上移同样的距离。
+ *  Android 上 visualViewport 同样可用，行为一致，不需要分支。 */
+function useKeyboardLift(enabled: boolean) {
+  const [lift, setLift] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!enabled || !vv) { setLift(0); return undefined; }
+    const update = () => {
+      /* vv.height 是「可见区域高度」，innerHeight 是布局视口高度，
+         两者之差就是键盘高度（再减掉 vv.offsetTop 处理页面被顶起的情况）。
+         小于 60px 视为噪声（地址栏收缩、橡皮筋），不上移。 */
+      const gap = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      setLift(gap > 60 ? gap : 0);
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [enabled]);
+  return lift;
+}
+
 /* ——— 底部弹层 ——— */
 export function Sheet({ open, onClose, children, z = "z-40" }: { open: boolean; onClose: () => void; children: React.ReactNode; z?: string }) {
   const [render, setRender] = useState(open);
+  const lift = useKeyboardLift(open);
   useEffect(() => {
     if (open) setRender(true);
     else { const t = window.setTimeout(() => setRender(false), 230); return () => window.clearTimeout(t); }
@@ -32,9 +61,16 @@ export function Sheet({ open, onClose, children, z = "z-40" }: { open: boolean; 
     <div className={`absolute inset-0 ${z}`}>
       <div className={`absolute inset-0 ${open ? "a-fade" : "opacity-0 transition-opacity duration-200"}`}
         style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose} />
-      <div className={`absolute bottom-0 inset-x-0 bg-s2 elev-3 overflow-hidden ${open ? "a-sheet" : "a-sheet-out"}`}
-        style={{ paddingBottom: "var(--sab, 0px)", borderTopLeftRadius: "var(--r-lg)", borderTopRightRadius: "var(--r-lg)" }}>
-        <div className="pt-3 pb-1 flex justify-center"><div className="w-8 h-1 rounded-full bg-dim/70" /></div>
+      <div className={`hg-sheet-surface absolute bottom-0 inset-x-0 bg-s2 elev-3 overflow-hidden ${open ? "a-sheet" : "a-sheet-out"}`}
+        style={{
+          paddingBottom: "var(--sab, 0px)",
+          borderTopLeftRadius: "var(--r-lg)", borderTopRightRadius: "var(--r-lg)",
+          /* 用 marginBottom 而不是 transform：`.a-sheet` 的 keyframes 带 fill-mode:both，
+             动画结束后会一直占着 transform，inline 的 translateY 会被它盖掉。 */
+          marginBottom: lift || undefined,
+          transition: "margin-bottom .18s cubic-bezier(.2,0,0,1)",
+        }}>
+        <div className="pt-3 pb-1 flex justify-center"><div className="w-9 h-1 rounded-full bg-dim/70" /></div>
         {children}
       </div>
     </div>
