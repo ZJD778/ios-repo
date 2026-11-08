@@ -13,6 +13,17 @@ on:
         description: "要构建的分支或标签（留空 = 触发时选中的分支）"
         required: false
         default: ""
+      runner:
+        description: "runner 机型（默认 macos-15；若仍报 configuration not supported 就换下一个）"
+        required: true
+        default: "macos-15"
+        type: choice
+        options:
+          - macos-15
+          - macos-15-intel
+          - macos-26
+          - macos-26-intel
+          - macos-latest
   push:
     tags:
       - "ios-*"
@@ -33,8 +44,12 @@ env:
 
 jobs:
   ipa:
-    name: macos-14 / iphoneos arm64 / unsigned
-    runs-on: macos-14
+    name: iphoneos arm64 / unsigned
+    # 报 "The configuration 'macos-14-arm64-us-default' is not supported" 的真正原因：
+    # macOS 14 镜像已于 2026-11-02 从 GitHub Actions 全线退役，macos-14 标签不再分配机器，
+    # job 在启动前即被取消（3 秒 Cancelled、无任何日志）。换成 macos-15 即可。
+    # 交叉编译 aarch64-apple-ios 与宿主架构无关，Intel 机型出的也是 arm64 产物。
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 120
 
     steps:
